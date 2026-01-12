@@ -12,8 +12,8 @@ BANXICO_URL = "https://www.banxico.org.mx/SieAPIRest/service/v1/series"
 # Catálogo completo de series para tus notas
 SERIES = {
     "USD_FIX": "SF43718",            # Dólar FIX (Oficial)
-    "USD_VENTA_PROM": "SF46543",    # Dólar Ventanilla (Venta)
-    "USD_COMPRA_PROM": "SF46544",   # Dólar Ventanilla (Compra)
+    "USD_VENTA_PROM": "SF43719",    # Dólar Ventanilla (Venta)
+    "USD_COMPRA_PROM": "SF43717",   # Dólar Ventanilla (Compra)
     "UDI": "SP68257",               # Unidades de Inversión
     "EUR": "SF46410",               # Euro
     "GBP": "SF46407",               # Libra Esterlina
