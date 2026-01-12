@@ -5,92 +5,87 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# Token de acceso de Banxico
+# Configuración de Acceso
 API_TOKEN = os.getenv("BANXICO_API_KEY")
+BANXICO_URL = "https://www.banxico.org.mx/SieAPIRest/service/v1/series"
 
-# Series de Banxico con los códigos corregidos
+# Catálogo completo de series para tus notas
 SERIES = {
-    "USD": "SF43718",  # Dólar estadounidense (FIX)
-    "EUR": "SF46410",  # Euro
-    "GBP": "SF46407",  # Libra esterlina
-    "CNY": "SF290383",  # Yuan chino
-    "JPY": "SF46406"   # Yen japonés
+    "USD_FIX": "SF43718",            # Dólar FIX (Oficial)
+    "USD_VENTA_PROM": "SF46543",    # Dólar Ventanilla (Venta)
+    "USD_COMPRA_PROM": "SF46544",   # Dólar Ventanilla (Compra)
+    "UDI": "SP68257",               # Unidades de Inversión
+    "EUR": "SF46410",               # Euro
+    "GBP": "SF46407",               # Libra Esterlina
+    "JPY": "SF46406",               # Yen Japonés
+    "CNY": "SF290383"               # Yuan Chino
 }
 
-# Función para obtener la fecha de hoy y la de hace 20 días hábiles
 def obtener_fechas():
     hoy = datetime.today()
-    hace_20_dias = hoy - timedelta(days=30)  # Consideramos 30 días atrás para asegurarnos de capturar 20 hábiles
-    return hoy.strftime("%Y-%m-%d"), hace_20_dias.strftime("%Y-%m-%d")
-
-@app.route('/')
-def home():
-    return "¡El servidor está funcionando correctamente! Usa /tipo-cambio para obtener datos."
+    hace_30_dias = hoy - timedelta(days=30)
+    hace_un_anio = hoy - timedelta(days=365)
+    return {
+        "hoy": hoy.strftime("%Y-%m-%d"),
+        "inicio_hist": hace_30_dias.strftime("%Y-%m-%d"),
+        "hace_un_anio_rango": (hace_un_anio - timedelta(days=5)).strftime("%Y-%m-%d"),
+        "hace_un_anio_fin": hace_un_anio.strftime("%Y-%m-%d")
+    }
 
 @app.route('/tipo-cambio', methods=['GET'])
-def obtener_tipo_cambio():
-    headers = {"Bmx-Token": API_TOKEN}
+def obtener_datos_completos():
+    headers = {"Bmx-Token": API_TOKEN, "Accept": "application/json"}
     resultado = {}
+    f = obtener_fechas()
 
-    # Obtener las fechas necesarias
-    fecha_hoy, fecha_inicio = obtener_fechas()
+    # 1. OBTENER DATOS ACTUALES (Todas las divisas + UDI + Ventanilla)
+    ids_todas = ",".join(SERIES.values())
+    url_op = f"{BANXICO_URL}/{ids_todas}/datos/oportuno"
+    
+    res_op = requests.get(url_op, headers=headers)
+    if res_op.status_code == 200:
+        series_lista = res_op.json().get("bmx", {}).get("series", [])
+        for s in series_lista:
+            nombre = next((k for k, v in SERIES.items() if v == s["idSerie"]), s["idSerie"])
+            if s.get("datos"):
+                d = s["datos"][0]
+                resultado[nombre] = {
+                    "valor": float(d["dato"]) if d["dato"] not in ["N/E", ""] else None,
+                    "fecha": d["fecha"]
+                }
 
-    # 1️⃣ Consulta del USD (últimos 20 días hábiles)
-    url_usd_hist = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{SERIES['USD']}/datos/{fecha_inicio}/{fecha_hoy}"
-    response_usd_hist = requests.get(url_usd_hist, headers=headers)
-
-    if response_usd_hist.status_code == 200:
-        data_usd_hist = response_usd_hist.json()
-        serie_usd_hist = data_usd_hist.get("bmx", {}).get("series", [])[0]
-        historial_usd = serie_usd_hist.get("datos", [])
-
-        # Convertimos los datos en formato JSON y aseguramos que haya datos disponibles
-        if historial_usd:
-            resultado["USD_HIST"] = [
-                {"fecha": item["fecha"], "dato": float(item["dato"])}
-                for item in historial_usd if item["dato"] not in ["N/E", ""]
-            ]
-
-            # 2️⃣ Obtener el USD del último día hábil (el penúltimo dato en la lista)
-            if len(resultado["USD_HIST"]) > 1:
-                resultado["USD_YESTERDAY"] = resultado["USD_HIST"][-2]
-
-    # 3️⃣ Consulta del USD (hoy)
-    url_usd_today = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{SERIES['USD']}/datos/oportuno"
-    response_usd_today = requests.get(url_usd_today, headers=headers)
-
-    if response_usd_today.status_code == 200:
-        data_usd_today = response_usd_today.json()
-        serie_usd_today = data_usd_today.get("bmx", {}).get("series", [])[0]
-        if serie_usd_today.get("datos"):
-            dato_usd_today = serie_usd_today.get("datos")[0]
-            resultado["USD_TODAY"] = {
-                "fecha": dato_usd_today["fecha"],
-                "dato": float(dato_usd_today["dato"])
+    # 2. ANÁLISIS DE VARIACIÓN DIARIA (Usando historial de 30 días para USD FIX)
+    url_hist = f"{BANXICO_URL}/{SERIES['USD_FIX']}/datos/{f['inicio_hist']}/{f['hoy']}"
+    res_hist = requests.get(url_hist, headers=headers)
+    
+    if res_hist.status_code == 200:
+        datos_usd = [d for d in res_hist.json().get("bmx", {}).get("series", [])[0].get("datos", []) if d["dato"] not in ["N/E", ""]]
+        
+        if len(datos_usd) >= 2:
+            hoy_v, ayer_v = float(datos_usd[-1]["dato"]), float(datos_usd[-2]["dato"])
+            dif_diaria = hoy_v - ayer_v
+            resultado["ANALISIS_DIARIO"] = {
+                "dif_nominal": round(dif_diaria, 4),
+                "dif_porcentual": f"{round((dif_diaria/ayer_v)*100, 2)}%",
+                "tendencia": "sube" if dif_diaria > 0 else "baja"
             }
 
-    # 4️⃣ Consulta de otras divisas (solo la más reciente)
-    url_otras = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{','.join(SERIES.values())}/datos/oportuno"
-    response_otras = requests.get(url_otras, headers=headers)
-
-    if response_otras.status_code == 200:
-        data_otras = response_otras.json()
-        series_otras = data_otras.get("bmx", {}).get("series", [])
-
-        for serie in series_otras:
-            nombre_divisa = next((key for key, value in SERIES.items() if value == serie.get("idSerie")), "Desconocido")
-            if serie.get("datos"):
-                valor = serie.get("datos")[0].get("dato")
-                fecha = serie.get("datos")[0].get("fecha")
-
-                resultado[nombre_divisa] = {
-                    "fecha": fecha,
-                    "dato": float(valor) if valor not in ["N/E", ""] else None
-                }
+    # 3. COMPARATIVA ANUAL (Dólar hoy vs hace un año)
+    url_anio = f"{BANXICO_URL}/{SERIES['USD_FIX']}/datos/{f['hace_un_anio_rango']}/{f['hace_un_anio_fin']}"
+    res_anio = requests.get(url_anio, headers=headers)
+    
+    if res_anio.status_code == 200:
+        datos_anio = res_anio.json().get("bmx", {}).get("series", [])[0].get("datos", [])
+        if datos_anio and "USD_FIX" in resultado:
+            val_pasado = float(datos_anio[-1]["dato"])
+            val_actual = resultado["USD_FIX"]["valor"]
+            dif_anual = val_actual - val_pasado
+            resultado["ANALISIS_ANUAL"] = {
+                "valor_hace_un_anio": val_pasado,
+                "variacion_anual": f"{round((dif_anual/val_pasado)*100, 2)}%"
+            }
 
     return jsonify(resultado)
 
 if __name__ == '__main__':
-    port = int(os.getenv("PORT", "8080"))
-    app.run(host='0.0.0.0', port=port)
-
+    app.run(host='0.0.0.0', port=int(os.getenv("PORT", 8080)))
