@@ -22,40 +22,30 @@ SERIES_BMX = {
     "CNY": "SF290383"
 }
 
-# Monedas de interés: LatAm + Socio T-MEC + Refugio Global
+# Monedas seleccionadas por su interés en México
 MONEDAS_REGION = ["BRL", "COP", "CLP", "CAD", "CHF"]
 
 def obtener_datos_latam():
-    """Consulta ExchangeRate-API para obtener hoy vs ayer incluyendo el Franco Suizo"""
+    """Consulta solo los valores actuales para evitar el error de Plan Upgrade"""
     if not EXCHANGE_KEY:
         return {}
     
-    # Calculamos la fecha de ayer para la consulta histórica
-    ayer = (datetime.today() - timedelta(days=1))
     url_hoy = f"https://v6.exchangerate-api.com/v6/{EXCHANGE_KEY}/latest/USD"
-    url_ayer = f"https://v6.exchangerate-api.com/v6/{EXCHANGE_KEY}/history/USD/{ayer.year}/{ayer.month}/{ayer.day}"
     
     try:
-        res_hoy = requests.get(url_hoy).json().get("conversion_rates", {})
-        res_ayer = requests.get(url_ayer).json().get("conversion_rates", {})
+        res = requests.get(url_hoy, timeout=10).json()
+        if res.get("result") == "error":
+            return {}
+
+        rates = res.get("conversion_rates", {})
         
-        comparativa = {}
+        # Solo devolvemos el valor actual
+        resultado = {}
         for m in MONEDAS_REGION:
-            val_hoy = res_hoy.get(m)
-            val_ayer = res_ayer.get(m)
-            
-            if val_hoy and val_ayer:
-                diff = ((val_hoy - val_ayer) / val_ayer) * 100
-                # Para monedas en formato USD/Moneda: 
-                # Si diff > 0, el USD se fortaleció (la moneda local perdió valor).
-                comparativa[m] = {
-                    "valor": round(val_hoy, 4),
-                    "variacion_pct": abs(round(diff, 2)),
-                    "sentido": "retroceso" if diff > 0 else "fortalecimiento"
-                }
-        return comparativa
-    except Exception as e:
-        print(f"Error en consulta regional: {e}")
+            if m in rates:
+                resultado[m] = {"valor": round(rates[m], 4)}
+        return resultado
+    except:
         return {}
 
 @app.route('/tipo-cambio', methods=['GET'])
