@@ -88,8 +88,24 @@ def obtener_datos():
                 "variacion_anual": f"{round(variacion, 2)}%"
             }
 
-    return jsonify(resultado)
+# --- LÓGICA DE MONITOREO (Insertar antes del return) ---
+    precio_actual = float(resultado.get("DIVISAS_REGION", {}).get("MXN", {}).get("valor", 0))
+    precio_ayer = float(resultado.get("USD_FIX", {}).get("valor", 0))
 
+    diferencia_centavos = round((precio_actual - precio_ayer) * 100, 2)
+    
+    # Creamos el objeto MONITOR
+    resultado["MONITOR"] = {
+        "diferencia_abs_centavos": abs(diferencia_centavos),
+        "variacion_real_centavos": diferencia_centavos,
+        "alerta_activa": abs(diferencia_centavos) >= 10.0, # Umbral de 10 centavos
+        "sentido": "DEPRECIACIÓN" if diferencia_centavos > 0 else "APRECIACIÓN",
+        "emoji": "🚨" if diferencia_centavos > 0 else "🚀"
+    }
+
+    return jsonify(resultado)
+  
+ 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
