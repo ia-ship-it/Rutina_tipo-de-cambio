@@ -22,7 +22,7 @@ SERIES_BMX = {
     "CNY": "SF290383"
 }
 
-MONEDAS_REGION = ["BRL", "COP", "CLP", "CAD", "CHF"]
+MONEDAS_REGION = ["MXN", "BRL", "COP", "CLP", "CAD", "CHF"]
 
 def obtener_datos_latam():
     if not EXCHANGE_KEY: return {}
